@@ -16,23 +16,24 @@
 #include "SPI_NAND.h"
 
 /*
- * Packet layout per sample (37 bytes):
+ * Packet layout per sample (STRIDE_BYTES_PER_SAMPLE = 40, effective BYTES_PER_SAMPLE = 40):
  *   [0]      hh  (timestamp hours)
  *   [1]      mm  (timestamp minutes)
  *   [2]      ss  (timestamp seconds)
  *   [3..4]   sss (milliseconds, little-endian uint16)
  *   [5..10]  accelerometer XYZ (6 bytes raw, LSB first per axis)
  *   [11..16] gyroscope     XYZ (6 bytes raw, LSB first per axis)
- *   [17..24] light spectral 4x4 filters (F1..F8: 8 bytes, 4 selected filters
- *             from low SMUX group and 4 from high SMUX group, uint8 LSB/MSB
- *             pairs, see host-side parser for channel mapping)
- *   [25..26] light Clear channel (2 bytes, LSB first uint16)
- *   [27..28] light NIR   channel (2 bytes, LSB first uint16)
- *   [29..30] flicker frequency estimate in Hz (uint16, 0, 1, 100 or 120)
- *   [31..36] reserved for future use / alignment (currently zeroed)
+ *   [17..32] light spectral filters F1..F8 (8 channels × 2 bytes each, uint16
+ *             little-endian, mapping defined in as7341_driver.c and host-side
+ *             parser)
+ *   [33..34] light Clear channel (2 bytes, LSB first uint16)
+ *   [35..36] light NIR   channel (2 bytes, LSB first uint16)
+ *   [37..38] mains flicker category in Hz (uint16: 0, 50 or 60)
+ *   [39]     reserved for future use / alignment
  */
-#define BYTES_PER_SAMPLE 37
-#define SAMPLES_PER_PAGE (4096 / BYTES_PER_SAMPLE)
+#define BYTES_PER_SAMPLE         40U   /* logical sample payload size */
+#define STRIDE_BYTES_PER_SAMPLE  40U   /* byte stride used in NAND_packet */
+#define SAMPLES_PER_PAGE         (4096U / STRIDE_BYTES_PER_SAMPLE)
 
 typedef struct bookmark
 {
