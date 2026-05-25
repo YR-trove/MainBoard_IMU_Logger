@@ -302,9 +302,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
                 raw_light[17] = (uint8_t)(clear >> 8);
                 raw_light[18] = (uint8_t)(nir & 0xFFU);
                 raw_light[19] = (uint8_t)(nir >> 8);
-
-                /* Update MCU-side exposure metrics for this light sample. */
-                LightMetrics_Update(&spectrum, &timestamp);
             }
 
             /* Flicker: use on-chip flicker engine to classify mains freq
@@ -312,6 +309,11 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
             uint16_t mains_hz = AS7341_DetectMainsHz();
             raw_light[20] = (uint8_t)(mains_hz & 0xFFU);
             raw_light[21] = (uint8_t)(mains_hz >> 8);
+
+            /* Update MCU-side exposure metrics for this light sample,
+             * using flicker classification to split artificial vs natural
+             * and to gate circadian dose. */
+            LightMetrics_Update(&spectrum, &timestamp, mains_hz);
         }
 
         /* --- BLE transmission (IMU only, unchanged for now) --- */
