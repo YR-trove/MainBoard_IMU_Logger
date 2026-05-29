@@ -13,9 +13,12 @@
  *   - BlueWeightedIlluminance  = (F3 + F4) * Clear
  *   - UV_dose_accum            = sum(UV_risk)
  *   - BlueExposure_accum       = sum(BlueWeightedIlluminance)
+ *   - BlueExposureArtificial   = blue exposure from mains-flickering sources
+ *   - BlueExposureNatural      = blue exposure from non-flickering sources
  *   - CircadianDose_accum      = sum(BlueWeightedIlluminance) only when
  *                                timestamp is within an evening window
- *                                (default 20:00–24:00).
+ *                                (default 20:00–24:00) AND light is
+ *                                classified as artificial.
  *
  * All doses are expressed in arbitrary units per light sample (10 Hz).
  * The application or mobile app is expected to rescale them by the
@@ -27,7 +30,7 @@
 
 #include <stdint.h>
 
-#include "as7341_driver.h"  /* AS7341_Spectrum */
+#include "as7341_driver.h"      /* AS7341_Spectrum */
 #include "Memory_operations.h"  /* Time_Struct */
 
 #ifdef __cplusplus
@@ -40,12 +43,18 @@ extern "C" {
  * This should be called at the light sensor rate (10 Hz), after a successful
  * AS7341_ReadFullSpectrum() call and after the timestamp has been updated.
  *
+ * The light type (artificial vs natural/DC) is inferred from mains_hz:
+ *   - mains_hz == 50 or 60 → artificial (mains-driven)
+ *   - mains_hz == 0        → natural or DC-driven
+ *
  * @param[in] spectrum   Latest full spectral frame (F1..F8, Clear, NIR).
  * @param[in] timestamp  Current logical time (hh:mm:ss) used for circadian
  *                       window gating; not necessarily wall-clock time.
+ * @param[in] mains_hz   Flicker classification: 0, 50, or 60.
  */
 void LightMetrics_Update(const AS7341_Spectrum *spectrum,
-                         const Time_Struct *timestamp);
+                         const Time_Struct *timestamp,
+                         uint16_t mains_hz);
 
 /* --- Getters for latest instantaneous values (for BLE or debugging) ------ */
 
@@ -72,9 +81,16 @@ uint64_t LightMetrics_GetUvDoseAccum(void);
 /** @return Cumulative blue-weighted exposure over all samples. */
 uint64_t LightMetrics_GetBlueExposureAccum(void);
 
+/** @return Cumulative blue exposure from artificial (mains-flickering) light. */
+uint64_t LightMetrics_GetBlueExposureArtificialAccum(void);
+
+/** @return Cumulative blue exposure from natural or DC-driven light. */
+uint64_t LightMetrics_GetBlueExposureNaturalAccum(void);
+
 /**
  * @return Cumulative circadian-relevant dose (only samples whose timestamp
- *         is within the configured window contribute).
+ *         is within the configured window and classified as artificial
+ *         contribute).
  */
 uint64_t LightMetrics_GetCircadianDoseAccum(void);
 
