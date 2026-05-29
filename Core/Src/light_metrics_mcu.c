@@ -20,7 +20,7 @@ static uint64_t s_uvDoseAccum = 0ULL;
 static uint64_t s_blueExposureAccum = 0ULL;
 static uint64_t s_circadianDoseAccum = 0ULL;
 
-/* New: split blue exposure by light type inferred from flicker classification */
+/* Split blue exposure by light type inferred from flicker classification. */
 static uint64_t s_blueExposureArtificialAccum = 0ULL;
 static uint64_t s_blueExposureNaturalAccum    = 0ULL;
 
@@ -50,20 +50,31 @@ void LightMetrics_Update(const AS7341_Spectrum *spectrum,
     }
 
     /*
-     * Channel mapping assumption (matching as7341_driver.c):
-     *   ch[0..7]  → F1..F8
-     *   ch[8]     → Clear
-     *   ch[9]     → NIR
+     * Canonical channel mapping in AS7341_Spectrum:
+     *   ch[0]  → F1
+     *   ch[1]  → F2
+     *   ch[2]  → F3
+     *   ch[3]  → F4
+     *   ch[4]  → Clear (pass 1)
+     *   ch[5]  → NIR   (pass 1)
+     *   ch[6]  → F5
+     *   ch[7]  → F6
+     *   ch[8]  → F7
+     *   ch[9]  → F8
+     *   ch[10] → Clear (pass 2)
+     *   ch[11] → NIR   (pass 2)
      */
     uint32_t F1    = spectrum->ch[0];
     uint32_t F2    = spectrum->ch[1];
     uint32_t F3    = spectrum->ch[2];
     uint32_t F4    = spectrum->ch[3];
-    uint32_t F5    = spectrum->ch[4];
-    uint32_t F6    = spectrum->ch[5];
-    uint32_t F7    = spectrum->ch[6];
-    uint32_t F8    = spectrum->ch[7];
-    uint32_t CLEAR = spectrum->ch[8];
+    uint32_t F5    = spectrum->ch[6];
+    uint32_t F6    = spectrum->ch[7];
+    uint32_t F7    = spectrum->ch[8];
+    uint32_t F8    = spectrum->ch[9];
+
+    /* Use Clear from second pass to align with logging/visualisation. */
+    uint32_t CLEAR = spectrum->ch[10];
 
     uint32_t sum_all = F1 + F2 + F3 + F4 + F5 + F6 + F7 + F8;
     if (sum_all == 0U) {
