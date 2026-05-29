@@ -54,6 +54,9 @@
 /* Light sensor is sampled every LIGHT_SUBSAMPLE IMU ticks (100 Hz / 10 = 10 Hz) */
 #define LIGHT_SUBSAMPLE  10U
 
+/* Interval (ms) between mains flicker classification updates in main loop. */
+#define FLICKER_UPDATE_PERIOD_MS  2000U
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -105,6 +108,10 @@ static AS7341_Spectrum spectrum;        /* full spectral frame */
  */
 uint8_t raw_light[22] = {0};
 static uint8_t light_tick = 0; /* subsample counter */
+
+/* Latest mains flicker classification, updated periodically in main loop. */
+static volatile uint16_t g_mains_hz = 0U;
+static uint32_t g_last_flicker_update_ms = 0U;
 
 /// ----- NAND FLASH variables ----- ///
 
@@ -246,8 +253,18 @@ int main(void)
 	  		break;
 
 	  	  case STATE_ACQUISITION:
-	  		   /* All acquisition handled in TIM2 callback */
-			break;
+            /*
+             * Periodically refresh mains flicker classification in the
+             * foreground. This avoids long blocking calls inside the
+             * 100 Hz timer ISR while still providing reasonably fresh
+             * classification for tagging light samples.
+             */
+            if ((HAL_GetTick() - g_last_flicker_update_ms) >= FLICKER_UPDATE_PERIOD_MS) {
+                uint16_t new_mains = AS7341_DetectMainsHz();
+                g_mains_hz = new_mains;  /* 16-bit, single store is atomic on Cortex-M33 */
+                g_last_flicker_update_ms = HAL_GetTick();
+            }
+	  		break;
 
 	  	  case STATE_USB_CONNECTED:
 	  		break;
@@ -327,8 +344,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
                 raw_light[18] = (uint8_t)(nir2 & 0xFFU);
                 raw_light[19] = (uint8_t)(nir2 >> 8);
 
-                /* Flicker: classify mains frequency for this light sample. */
-                uint16_t mains_hz = AS7341_DetectMainsHz();
+                /* Use latest mains classification captured in the main loop. */
+                uint16_t mains_hz = g_mains_hz;
                 raw_light[20] = (uint8_t)(mains_hz & 0xFFU);
                 raw_light[21] = (uint8_t)(mains_hz >> 8);
 
