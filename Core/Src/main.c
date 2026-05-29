@@ -9,9 +9,9 @@
   * @details        : The application operates using a State Machine triggered by a
   * single USER BUTTON. It performs three primary tasks:
   * 1. Real-time Acquisition: Reads Accelerometer/Gyroscope data from the LSM6DSO16IS
-  *    via I2C at 100 Hz (TIM2), and Clear/NIR channels plus full spectral
-  *    filters and mains flicker classification from the AS7341 at ~10 Hz
-  *    (every 10th timer tick) on the same I2C bus (hi2c3).
+  *    via I2C at 100 Hz (TIM2), and full spectral filters plus mains flicker
+  *    classification from the AS7341 at ~10 Hz (every 10th timer tick) on the
+  *    same I2C bus (hi2c3).
   * 2. Wireless Transmission: Sends data packets via Bluetooth Low Energy (BLE)
   *    using the UART interface.
   * 3. Data Logging: Saves acquired data to NAND Flash memory.
@@ -99,9 +99,9 @@ static AS7341_Spectrum spectrum;        /* full spectral frame */
 /*
  * raw_light layout (22 bytes):
  *   [0..15]  8 spectral filters F1..F8 (uint16 each, little-endian)
- *   [16..17] Clear channel   (uint16, little-endian)
- *   [18..19] NIR   channel   (uint16, little-endian)
- *   [20..21] Mains freq (uint16, little-endian: 0, 50 or 60 Hz equivalent)
+ *   [16..17] Clear channel   (uint16, little-endian; Clear from second SMUX pass)
+ *   [18..19] NIR   channel   (uint16, little-endian; NIR   from second SMUX pass)
+ *   [20..21] Mains freq      (uint16, little-endian: 0, 50 or 60 Hz equivalent)
  */
 uint8_t raw_light[22] = {0};
 static uint8_t light_tick = 0; /* subsample counter */
@@ -287,33 +287,56 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
             /* Full spectrum: 12 channels (F1–F8, Clear, NIR) */
             if (AS7341_ReadFullSpectrum(&spectrum)) {
-                /* Copy all 8 filter channels F1..F8 (indices 0..7 in spectrum) */
-                for (uint8_t i = 0; i < 8; i++) {
+                /*
+                 * Canonical mapping in AS7341_Spectrum (see as7341_driver.c):
+                 *   ch[0]  → F1
+                 *   ch[1]  → F2
+                 *   ch[2]  → F3
+                 *   ch[3]  → F4
+                 *   ch[4]  → Clear (pass 1)
+                 *   ch[5]  → NIR   (pass 1)
+                 *   ch[6]  → F5
+                 *   ch[7]  → F6
+                 *   ch[8]  → F7
+                 *   ch[9]  → F8
+                 *   ch[10] → Clear (pass 2)
+                 *   ch[11] → NIR   (pass 2)
+                 */
+
+                /* Pack F1..F4 from ch[0..3]. */
+                for (uint8_t i = 0; i < 4; i++) {
                     uint16_t v = spectrum.ch[i];
                     raw_light[2U * i]     = (uint8_t)(v & 0xFFU);
                     raw_light[2U * i + 1] = (uint8_t)(v >> 8);
                 }
 
-                /* Clear and NIR: use two of the remaining channels. Adjust
-                 * indices if you change SMUX mapping in as7341_driver.c. */
-                uint16_t clear = spectrum.ch[8];
-                uint16_t nir   = spectrum.ch[9];
-                raw_light[16] = (uint8_t)(clear & 0xFFU);
-                raw_light[17] = (uint8_t)(clear >> 8);
-                raw_light[18] = (uint8_t)(nir & 0xFFU);
-                raw_light[19] = (uint8_t)(nir >> 8);
+                /* Pack F5..F8 from ch[6..9] into raw_light[8..15]. */
+                for (uint8_t i = 0; i < 4; i++) {
+                    uint16_t v = spectrum.ch[6U + i];
+                    uint8_t  idx = 4U + i;  /* F5..F8 occupy raw_light indices 4..7 */
+                    raw_light[2U * idx]     = (uint8_t)(v & 0xFFU);
+                    raw_light[2U * idx + 1] = (uint8_t)(v >> 8);
+                }
+
+                /* Use Clear/NIR from second SMUX pass so they are the last
+                 * channels in the logged frame. */
+                uint16_t clear2 = spectrum.ch[10];
+                uint16_t nir2   = spectrum.ch[11];
+                raw_light[16] = (uint8_t)(clear2 & 0xFFU);
+                raw_light[17] = (uint8_t)(clear2 >> 8);
+                raw_light[18] = (uint8_t)(nir2 & 0xFFU);
+                raw_light[19] = (uint8_t)(nir2 >> 8);
+
+                /* Flicker: classify mains frequency for this light sample. */
+                uint16_t mains_hz = AS7341_DetectMainsHz();
+                raw_light[20] = (uint8_t)(mains_hz & 0xFFU);
+                raw_light[21] = (uint8_t)(mains_hz >> 8);
+
+                /* Update MCU-side exposure metrics for this light sample,
+                 * using flicker classification to split artificial vs natural
+                 * and to gate circadian dose. */
+                LightMetrics_Update(&spectrum, &timestamp, mains_hz);
             }
-
-            /* Flicker: use on-chip flicker engine to classify mains freq
-             * into {0, 50, 60} Hz equivalents. */
-            uint16_t mains_hz = AS7341_DetectMainsHz();
-            raw_light[20] = (uint8_t)(mains_hz & 0xFFU);
-            raw_light[21] = (uint8_t)(mains_hz >> 8);
-
-            /* Update MCU-side exposure metrics for this light sample,
-             * using flicker classification to split artificial vs natural
-             * and to gate circadian dose. */
-            LightMetrics_Update(&spectrum, &timestamp); //, mains_hz
         }
 
         /* --- BLE transmission (IMU only, unchanged for now) --- */
